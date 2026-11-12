@@ -1,0 +1,23 @@
+name = "mavis"
+version = 1
+namespace = "mavis"
+migrations = ["001.sql"]
+legacy_artifact_kinds = ["building", "scene"]
+[[legacy_predicates]]
+name = "primary_building"
+target_kind = "building"
+unique_source = true
+[[tables]]
+name = "mavis_buildings"
+primary_key = "id"
+entity_column = "entity_id"
+entity_kind = "building"
+columns = ["id", "entity_id", "address", "native_house_id", "native_object_id", "latitude", "longitude", "import_revision", "provenance_ref"]
+required = ["id", "entity_id", "import_revision", "provenance_ref"]
+[[tables]]
+name = "mavis_scenes"
+primary_key = "id"
+entity_column = "entity_id"
+entity_kind = "scene"
+columns = ["id", "entity_id", "scope", "pipeline_stage", "terrain_parameters_json", "import_revision", "provenance_ref"]
+required = ["id", "entity_id", "import_revision", "provenance_ref"]

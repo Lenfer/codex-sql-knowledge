@@ -1,0 +1,10 @@
+name = "demo"
+version = 1
+namespace = "demo"
+migrations = ["001.sql"]
+[[tables]]
+name = "demo_items"
+primary_key = "id"
+entity_column = "entity_id"
+columns = ["id", "entity_id", "value"]
+required = ["id", "entity_id", "value"]
