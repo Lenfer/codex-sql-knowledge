@@ -15,12 +15,16 @@ def main():
  q=sub.add_parser('search');q.add_argument('--text',required=True);q.add_argument('--limit',type=int,default=20);q.add_argument('--include-inactive',action='store_true')
  q=sub.add_parser('history');q.add_argument('--id',required=True);q.add_argument('--limit',type=int,default=100)
  for name in ['entity','knowledge','decision','link']:sub.add_parser(name).add_argument('--input',required=True)
+ for name in ['check-maintain','check-reports']:sub.add_parser(name)
  a=p.parse_args()
  try:
   if a.command=='init':result=initialize(a.project,a.project_id,a.title)
   elif a.command in ['writer-status','writer-stop','writer-start','checkpoint']:
    from .coordinator import submit
    result=submit(Project(a.project),{'writer-status':'status','writer-stop':'shutdown','writer-start':'resume','checkpoint':'checkpoint'}[a.command],{})
+  elif a.command in ['check-maintain','check-reports']:
+   from . import audit_cache
+   result=getattr(audit_cache,'maintain' if a.command=='check-maintain' else 'reports')(Project(a.project))
   elif a.command.startswith('check'):
    from . import check_jobs as jobs
    project=Project(a.project)

@@ -42,7 +42,7 @@ records, change history and receipts together.
 
 ## Install from source
 
-This is a development release, `0.2.0.dev2`. Use Python 3.11+ with SQLite 3.51.3+
+This is a development release, `0.2.0.dev3`. Use Python 3.11+ with SQLite 3.51.3+
 and FTS5. Check the SQLite linked to your chosen Python before creating a project:
 
 ```bash
@@ -129,7 +129,12 @@ an existing building/scene schema; generic projects do not require it.
 The CLI `check` waits for the full report. Through MCP, advance the audit with
 `project_check_step` until it finishes, then read its report. Only `status=complete`
 with `ok=true` confirms a passing audit. A full audit creates a backup snapshot in
-the project's `.tmp/check-jobs/` directory; account for that disk space.
+the project's `.tmp/check-jobs/` directory; account for that disk space. After
+a completed audit, the runtime saves a compact report and releases the snapshot.
+It keeps the latest 20 error reports and one success in a separate service cache.
+Maintenance runs at MCP startup, every five minutes and after completion, without
+model calls or an OS background service. Incomplete and protected jobs remain.
+See [audit lifecycle](docs/AUDIT_LIFECYCLE.md) for retention and recovery.
 
 Keep a live database on a local filesystem on one computer. For a consistent copy,
 use SQLite's backup API. Do not copy only the main file while WAL connections are

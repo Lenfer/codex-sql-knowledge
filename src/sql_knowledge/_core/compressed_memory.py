@@ -79,7 +79,13 @@ def project_path(value):
     require(p.parts and p.parts[0] != '.git', 'Git internal files do not belong in the catalog')
     if p.parts[0] in {'.tmp', '.report'}:
         require(len(p.parts) >= 3, 'temporary artifacts require a daily directory and a filename')
-        require(dt.date.fromisoformat(p.parts[1]).isoformat() == p.parts[1], 'invalid daily directory')
+        # Audit jobs are created by this runtime under their own reserved root.
+        # Catalog support does not grant deletion: storage policies still gate it.
+        if p.parts[0] == '.tmp' and p.parts[1] == 'check-jobs':
+            require(len(p.parts[2]) == 32 and all(c in '0123456789abcdef' for c in p.parts[2]),
+                    'invalid audit job directory')
+        else:
+            require(dt.date.fromisoformat(p.parts[1]).isoformat() == p.parts[1], 'invalid daily directory')
     resolved = (ROOT / str(p)).resolve()
     require(resolved == ROOT or ROOT in resolved.parents, 'path escapes the project through a symlink')
     return str(p)

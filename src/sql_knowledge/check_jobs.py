@@ -12,7 +12,7 @@ import threading
 import fcntl
 import uuid
 
-from . import compressed, extensions
+from . import compressed, extensions, audit_cache
 
 ALGORITHM_VERSION = 4
 
@@ -29,7 +29,22 @@ def _signature(path):
 def _folder(project, job_id):
     if not isinstance(job_id, str) or len(job_id) != 32 or any(c not in '0123456789abcdef' for c in job_id):
         raise ValueError('invalid check job id')
-    return project.root / '.tmp/check-jobs' / job_id
+    path = project.root / '.tmp/check-jobs' / job_id
+    for part in (project.root/'.tmp', project.root/'.tmp/check-jobs', path):
+        if part.is_symlink():
+            raise ValueError('audit cache symlink is forbidden')
+    return path
+
+
+class _LockedState(sqlite3.Connection):
+    def close(self):
+        try:
+            super().close()
+        finally:
+            guard = getattr(self, '_lifecycle_guard', None)
+            if guard is not None:
+                self._lifecycle_guard = None
+                guard.__exit__(None, None, None)
 
 
 def _problem(state, kind, **values):
@@ -58,11 +73,21 @@ def _open(project, job_id):
     with closing(project.connect()):
         pass
     folder = _folder(project, job_id)
-    state = sqlite3.connect(folder / 'state.sqlite', timeout=2)
+    if (folder/'state.sqlite').is_symlink() or (folder/'snapshot.sqlite').is_symlink():
+        raise ValueError('audit database symlink is forbidden')
+    guard = audit_cache.guard(project, job_id)
+    guard.__enter__()
+    try:
+        state = sqlite3.connect((folder/'state.sqlite').as_uri()+'?mode=rw', uri=True,
+                                timeout=2, factory=_LockedState)
+        state._lifecycle_guard = guard
+    except BaseException:
+        guard.__exit__(None, None, None)
+        raise
     try:
         state.execute('BEGIN IMMEDIATE')
         meta = _meta(state)
-        if (meta['project_id'] != project.id or meta['root'] != str(project.root)
+        if (meta['job_id'] != job_id or meta['project_id'] != project.id or meta['root'] != str(project.root)
                 or meta['instance_id'] != getattr(project, 'instance_id', None)):
             raise ValueError('check job project/instance binding mismatch')
         if meta['algorithm_version'] != ALGORITHM_VERSION:
@@ -77,6 +102,12 @@ def _open(project, job_id):
 
 def start(project, files=True):
     """Backup is synchronous; subsequent logical execution is batched and resumable."""
+    with audit_cache.guard(project, 'admission', exclusive=True):
+        audit_cache.admission(project)
+        return _start(project, files)
+
+
+def _start(project, files=True):
     job_id = uuid.uuid4().hex
     folder = _folder(project, job_id)
     folder.mkdir(parents=True, mode=0o700)
@@ -142,8 +173,23 @@ def _advance(meta, phase, cursor=0):
 def step(project, job_id, batch_size=1000):
     if type(batch_size) is not int or not 1 <= batch_size <= 10000:
         raise ValueError('batch_size must be 1..10000')
+    if not (_folder(project,job_id)/'state.sqlite').exists():
+        report=audit_cache.saved_result(project,job_id,0,1)
+        if report is None:
+            raise audit_cache.CacheError('audit_report_unavailable','audit report expired or job does not exist')
+        return {k:v for k,v in report.items() if k not in ('problems','offset','limit')}
+    result=_step(project,job_id,batch_size)
+    if result['status']=='complete':
+        result.update(audit_cache.finalize(project,job_id))
+    return result
+
+
+def _step(project, job_id, batch_size):
     folder, state, meta = _open(project, job_id)
-    db = sqlite3.connect('file:' + str(folder / 'snapshot.sqlite') + '?mode=ro', uri=True)
+    try:
+        db = sqlite3.connect((folder/'snapshot.sqlite').as_uri()+'?mode=ro', uri=True)
+    except BaseException:
+        state.close();raise
     db.row_factory = sqlite3.Row
     compressed.register_codecs(db)
     try:
@@ -335,6 +381,9 @@ def step(project, job_id, batch_size=1000):
                 threading.Thread(target=process.wait,daemon=True).start()
                 meta['physical_pid']=process.pid
                 meta['physical_started']=time.time()
+        if meta['status']=='complete' and 'completed_at' not in meta:
+            import datetime
+            meta['completed_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
         meta['checked'] += len(rows)
         _save(state,meta);state.commit()
         return _public(state,meta)
@@ -352,6 +401,12 @@ def step(project, job_id, batch_size=1000):
 def result(project, job_id, offset=0, limit=100):
     if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=1000:
         raise ValueError('offset>=0 and limit1..1000 required')
+    saved=audit_cache.saved_result(project,job_id,offset,limit)
+    if saved is not None:
+        return saved
+    folder = _folder(project, job_id)
+    if not (folder/'state.sqlite').exists():
+        raise audit_cache.CacheError('audit_report_unavailable','audit report expired or job does not exist')
     _,state,meta=_open(project,job_id)
     try:
         return dict(_public(state,meta),problems=[json.loads(r[0]) for r in state.execute('SELECT body FROM problems ORDER BY seq LIMIT ? OFFSET ?',(limit,offset))],offset=offset,limit=limit)
@@ -359,6 +414,8 @@ def result(project, job_id, offset=0, limit=100):
 
 
 def cancel(project, job_id):
+    if not (_folder(project,job_id)/'state.sqlite').exists():
+        return result(project,job_id,0,1)
     _,state,meta=_open(project,job_id)
     try:
         if meta['status']=='running':
@@ -380,7 +437,7 @@ def _alive(pid):
 def _physical_body(folder):
     """Independent worker: never opens the live DB; bounds memory and wall time."""
     folder=Path(folder)
-    with closing(sqlite3.connect(folder/'snapshot.sqlite')) as db, closing(sqlite3.connect(folder/'physical.sqlite')) as output:
+    with closing(sqlite3.connect((folder/'snapshot.sqlite').as_uri()+'?mode=ro',uri=True)) as db, closing(sqlite3.connect(folder/'physical.sqlite')) as output:
         compressed.register_codecs(db)
         output.execute('CREATE TABLE IF NOT EXISTS problems(seq INTEGER PRIMARY KEY,body TEXT)')
         output.execute('DELETE FROM problems')
@@ -404,7 +461,9 @@ def _physical(folder):
     folder=Path(folder)
     # A live PID alone is insufficient after PID reuse. The OS lock also prevents
     # two recovery workers from writing the same output when a lease is stale.
-    with (folder/'physical.lock').open('a+b') as guard:
+    from types import SimpleNamespace
+    project = SimpleNamespace(root=folder.parents[2])
+    with audit_cache.guard(project, folder.name), (folder/'physical.lock').open('a+b') as guard:
         try:fcntl.flock(guard,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return
         stopped=threading.Event()

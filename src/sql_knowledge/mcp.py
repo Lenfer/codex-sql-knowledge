@@ -1,5 +1,6 @@
 """Shared stdio MCP, bound to one explicit project. No export tool."""
 import argparse,asyncio,datetime,functools,json,subprocess,sys,tempfile,uuid,threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from .engine import BASE,Project,module
@@ -68,7 +69,15 @@ def create_server(root):
  adapter.StorageFileEnvelope=StorageFileEnvelope;adapter.StorageIDsEnvelope=StorageIDsEnvelope
  adapter.CleanupPlanEnvelope=CleanupPlanEnvelope;adapter.CleanupExecuteEnvelope=CleanupExecuteEnvelope
  adapter.EntityEnvelope=GenericEntityEnvelope;adapter.RelationEnvelope=GenericRelationEnvelope
- adapter.Service=Service;server=adapter.create_server(project.database)
+ from . import audit_cache
+ @asynccontextmanager
+ async def lifespan(server):
+  stop=asyncio.Event();task=asyncio.create_task(audit_cache.periodic(project,stop))
+  try:yield
+  finally:
+   stop.set()
+   await task
+ adapter.Service=Service;server=adapter.create_server(project.database,lifespan=lifespan)
  server.remove_tool('buildings_get');server.remove_tool('scenes_get')
  def checked(function,*args,**kwargs):
   try:
@@ -92,6 +101,18 @@ def create_server(root):
  @server.tool(annotations=adapter.READ)
  def project_check_cancel(job_id:str)->dict:
   return checked(check_jobs.cancel,job_id)
+ @server.tool(annotations=adapter.READ)
+ def project_check_reports()->dict:
+  """List retained audit summaries: last20 errors and last1 success per project."""
+  return checked(audit_cache.reports)
+ @server.tool(annotations=adapter.WRITE)
+ def project_check_maintenance()->dict:
+  """Retry automatic report retention and completed-cache release now.
+
+  Also runs on MCP startup, every five minutes and after audit completion.
+  Preserves incomplete, busy, keep and catalog-owned files. No model calls.
+  """
+  return checked(audit_cache.maintain)
  @server.tool(annotations=adapter.READ)
  def project_writer_status()->dict:
   from .coordinator import submit

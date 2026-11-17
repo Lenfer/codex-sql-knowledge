@@ -1,6 +1,6 @@
 # Validation and limits
 
-Version: `0.2.0.dev2`. This is a development release.
+Version: `0.2.0.dev3`. This is a development release.
 
 On 12 November 2026 the source project's suite passed 108 tests in 88.455 seconds
 on macOS, Python 3.14.6 and SQLite 3.53.4. The environment used MCP 1.26.0 and
@@ -44,3 +44,25 @@ Run from the checkout with the installed package:
 .venv/bin/python scripts/run_tests.py
 .venv/bin/python examples/run_demo.py --project /absolute/path/to/new-demo
 ```
+
+
+## Automatic audit lifecycle
+
+The final 0.2.0.dev3 source suite passed 124 tests in 58.527 seconds on
+17 November 2026. It covers real MCP startup/completion maintenance,
+exact 20-error/one-success
+retention, both core schemas, more than 1000 findings without truncation, failed
+report saves, interrupted unlink recovery, late keep/fingerprint checks, open
+files, symlinks, foreign identities, incomplete jobs and a model-free periodic
+loop, parallel maintenance, marker-only historical directories and projects with
+more than eight incomplete audits. Audit-start quotas apply only when explicitly
+configured. Historical results above refer to the earlier 0.2.0.dev2 publication.
+
+The final installed wheel passed 16 focused regression tests in 20.511 seconds,
+including real MCP sessions and the removal of implicit admission quotas. The
+preceding installed build passed the full 123-test suite in 162.677 seconds;
+the subsequent correction changed the admission defaults and added its regression.
+The final wheel's Python modules matched the source byte for byte. Its SHA-256 is
+`01e8047f752e7a034051e0c695199b064310bff7f68b52ef095e6c131a5c3501`.
+A full audit of the source project completed without problems; its report remained
+readable and its snapshot directory was automatically released.

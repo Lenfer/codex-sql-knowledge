@@ -43,7 +43,12 @@ until a terminal status, then `project_check_report(job_id, offset, limit)` to r
 the results. A running, failed or cancelled job is not a pass. A job pins project
 identity and snapshot metadata. CLI `check` waits for all phases.
 
-Preserve audit results you need before explicitly cleaning snapshots. The runtime
+Completed snapshots release automatically after report storage. The runtime keeps
+20 error reports and one success in `.tmp/check-reports/reports.sqlite`; it prunes
+older service reports without changing project knowledge or events. MCP runs this
+code on startup, every 300 seconds and after audit completion. Incomplete, busy,
+keep and catalog-owned jobs stay protected. See [audit lifecycle](AUDIT_LIFECYCLE.md).
+The runtime
 does not delete project evidence when a file goes missing; reconciliation keeps
 the record and history.
 

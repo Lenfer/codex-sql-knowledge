@@ -154,6 +154,9 @@ class Writer:
     elif kind=='checkpoint':
      result=dict(ok=True,checkpoint=list(self.db.execute('PRAGMA wal_checkpoint(PASSIVE)').fetchone()))
     elif kind=='storage':result=self.storage_execute(payload,prepared or {})
+    elif kind=='audit_cache':
+     from .audit_cache import dispatch
+     result=dispatch(self.project,payload)
     else:raise CoordinatorError('invalid_operation','unsupported writer operation')
     return dict(result,_writer=dict(elapsed_ms=(time.perf_counter()-start)*1000,busy_retries=busy,pid=os.getpid(),commit_ms=getattr(self.db,'_last_commit_ms',None)))
    except sqlite3.OperationalError as exc:
@@ -273,7 +276,7 @@ async def serve(root,identity,instance):
     else:
      if stop.is_set():raise CoordinatorError('draining','writer is stopping')
      if state['maintenance'] or fence_path(project).exists():raise CoordinatorError('maintenance','admission closed for lifecycle maintenance')
-     if req['kind'] not in ['core','extension','migrate','storage','checkpoint','legacy_lease']:raise CoordinatorError('invalid_operation','unknown operation')
+     if req['kind'] not in ['core','extension','migrate','storage','checkpoint','legacy_lease','audit_cache']:raise CoordinatorError('invalid_operation','unknown operation')
      import tomllib
      actual=tomllib.loads((project.root/'knowledge.toml').read_text())
      if req.get('manifest_contract')!=contract(actual):raise CoordinatorError('stale_contract','manifest contract changed; restart client')

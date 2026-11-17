@@ -207,9 +207,9 @@ class Service:
                     db.close()
 
 
-def create_server(database):
+def create_server(database, lifespan=None):
     service = Service(database)
-    server = FastMCP('sql-knowledge', instructions='Single local SQLite store; use typed envelopes. Evidence tools retrieve records, never invent answers. Read schema_describe for limits.')
+    server = FastMCP('sql-knowledge', instructions='Single local SQLite store; use typed envelopes. Evidence tools retrieve records, never invent answers. Read schema_describe for limits.', lifespan=lifespan)
 
     @server.tool(annotations=READ)
     def project_context() -> dict:
